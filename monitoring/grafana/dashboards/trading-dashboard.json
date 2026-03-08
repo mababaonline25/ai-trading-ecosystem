@@ -1,0 +1,333 @@
+{
+  "dashboard": {
+    "title": "Trading Platform Overview",
+    "description": "Comprehensive monitoring dashboard for AI Trading Ecosystem",
+    "tags": ["trading", "crypto", "production"],
+    "timezone": "browser",
+    "editable": true,
+    "refresh": "30s",
+    "panels": [
+      {
+        "title": "System Health",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0}
+      },
+      {
+        "title": "Service Status",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+        "targets": [
+          {
+            "expr": "count(up == 1)",
+            "legendFormat": "Healthy"
+          },
+          {
+            "expr": "count(up == 0)",
+            "legendFormat": "Unhealthy"
+          }
+        ],
+        "options": {
+          "colorMode": "background",
+          "graphMode": "none",
+          "textMode": "auto"
+        }
+      },
+      {
+        "title": "Active Users",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 4, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(active_users_total)",
+            "legendFormat": "Active Users"
+          }
+        ],
+        "xaxis": {"mode": "time"},
+        "yaxes": [{"format": "short", "label": "Users"}]
+      },
+      {
+        "title": "Orders per Second",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 12, "y": 1},
+        "targets": [
+          {
+            "expr": "rate(orders_total[1m])",
+            "legendFormat": "Orders/s"
+          }
+        ],
+        "xaxis": {"mode": "time"},
+        "yaxes": [{"format": "ops", "label": "Orders/s"}]
+      },
+      {
+        "title": "API Latency (P95)",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 20, "y": 1},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "P95"
+          }
+        ],
+        "xaxis": {"mode": "time"},
+        "yaxes": [{"format": "s", "label": "Latency"}]
+      },
+      {
+        "title": "Error Rate",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 9},
+        "targets": [
+          {
+            "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+            "legendFormat": "Error Rate"
+          }
+        ],
+        "xaxis": {"mode": "time"},
+        "yaxes": [{"format": "percentunit", "label": "Error Rate"}]
+      },
+      {
+        "title": "CPU Usage by Pod",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 9},
+        "targets": [
+          {
+            "expr": "sum(rate(container_cpu_usage_seconds_total[5m])) by (pod)",
+            "legendFormat": "{{ pod }}"
+          }
+        ],
+        "xaxis": {"mode": "time"},
+        "yaxes": [{"format": "percentunit", "label": "CPU"}]
+      },
+      {
+        "title": "Memory Usage by Pod",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 9},
+        "targets": [
+          {
+            "expr": "sum(container_memory_usage_bytes) by (pod)",
+            "legendFormat": "{{ pod }}"
+          }
+        ],
+        "xaxis": {"mode": "time"},
+        "yaxes": [{"format": "bytes", "label": "Memory"}]
+      },
+      {
+        "title": "Trading Metrics",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 17}
+      },
+      {
+        "title": "Trading Volume (24h)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 0, "y": 18},
+        "targets": [
+          {
+            "expr": "sum(increase(trading_volume_usd_total[24h]))",
+            "legendFormat": "Volume"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "textMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 0
+          }
+        }
+      },
+      {
+        "title": "Win Rate",
+        "type": "gauge",
+        "gridPos": {"h": 4, "w": 4, "x": 4, "y": 18},
+        "targets": [
+          {
+            "expr": "avg(trading_win_rate) * 100",
+            "legendFormat": "Win Rate"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["mean"]
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 40},
+                {"color": "green", "value": 60}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Active Positions",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 8, "y": 18},
+        "targets": [
+          {
+            "expr": "sum(active_positions_total)",
+            "legendFormat": "Positions"
+          }
+        ]
+      },
+      {
+        "title": "Daily P&L",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 4, "x": 12, "y": 18},
+        "targets": [
+          {
+            "expr": "sum(increase(daily_pnl_usd_total[24h]))",
+            "legendFormat": "P&L"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 0}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "title": "Order Book Depth",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 22},
+        "targets": [
+          {
+            "expr": "avg(orderbook_bid_depth) by (symbol)",
+            "legendFormat": "Bid Depth - {{ symbol }}"
+          },
+          {
+            "expr": "avg(orderbook_ask_depth) by (symbol)",
+            "legendFormat": "Ask Depth - {{ symbol }}"
+          }
+        ]
+      },
+      {
+        "title": "Spread by Symbol",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 22},
+        "targets": [
+          {
+            "expr": "avg(orderbook_spread_percent) by (symbol)",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "columns": [
+          {"text": "Symbol", "value": "symbol"},
+          {"text": "Spread %", "value": "Value"}
+        ]
+      },
+      {
+        "title": "Database Metrics",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 30}
+      },
+      {
+        "title": "PostgreSQL Connections",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 31},
+        "targets": [
+          {
+            "expr": "pg_stat_database_numbackends",
+            "legendFormat": "Connections"
+          }
+        ]
+      },
+      {
+        "title": "Redis Memory Usage",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 31},
+        "targets": [
+          {
+            "expr": "redis_memory_used_bytes",
+            "legendFormat": "Used"
+          },
+          {
+            "expr": "redis_memory_max_bytes",
+            "legendFormat": "Max"
+          }
+        ],
+        "yaxes": [{"format": "bytes"}]
+      },
+      {
+        "title": "RabbitMQ Queue Size",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 31},
+        "targets": [
+          {
+            "expr": "rabbitmq_queue_messages",
+            "legendFormat": "{{ queue }}"
+          }
+        ]
+      },
+      {
+        "title": "AI Metrics",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 39}
+      },
+      {
+        "title": "AI Inference Latency",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 40},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(ai_inference_duration_seconds_bucket[5m]))",
+            "legendFormat": "P95"
+          }
+        ]
+      },
+      {
+        "title": "AI Prediction Confidence",
+        "type": "graph",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 40},
+        "targets": [
+          {
+            "expr": "avg(ai_prediction_confidence) by (model)",
+            "legendFormat": "{{ model }}"
+          }
+        ],
+        "yaxes": [{"min": 0, "max": 100}]
+      },
+      {
+        "title": "Model Accuracy",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 40},
+        "targets": [
+          {
+            "expr": "avg(ai_model_accuracy)",
+            "legendFormat": "Accuracy"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100
+          }
+        }
+      }
+    ],
+    "schemaVersion": 36,
+    "version": 1,
+    "links": [],
+    "tags": ["trading", "production"]
+  }
+}

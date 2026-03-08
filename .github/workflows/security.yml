@@ -1,0 +1,202 @@
+"""
+Security Scanning Pipeline
+Automated security checks and vulnerability scanning
+"""
+
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**/requirements.txt'
+      - '**/package.json'
+      - '**/Dockerfile'
+  workflow_dispatch:
+
+jobs:
+  # ==================== CODEQL ANALYSIS ====================
+
+  codeql-analysis:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'python', 'javascript', 'typescript' ]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{matrix.language}}"
+
+  # ==================== DEPENDENCY SCANNING ====================
+
+  dependency-scan:
+    name: Dependency Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Scan Python dependencies
+        run: |
+          pip install safety
+          safety check -r backend/requirements/prod.txt --full-report
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Scan Node.js dependencies
+        run: |
+          cd frontend
+          npm audit --production
+
+      - name: Run OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'Trading Platform'
+          path: '.'
+          format: 'HTML'
+          out: 'reports'
+
+      - name: Upload dependency check report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: ${{ github.workspace }}/reports
+
+  # ==================== CONTAINER SCANNING ====================
+
+  container-scan:
+    name: Container Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker images
+        run: |
+          docker build -t trading-backend:test ./backend
+          docker build -t trading-frontend:test ./frontend
+
+      - name: Scan backend image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'trading-backend:test'
+          format: 'sarif'
+          output: 'trivy-backend.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Scan frontend image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'trading-frontend:test'
+          format: 'sarif'
+          output: 'trivy-frontend.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-backend.sarif'
+
+      - name: Scan with Snyk
+        uses: snyk/actions/docker@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          image: trading-backend:test
+          args: --file=backend/Dockerfile
+
+  # ==================== SECRETS SCANNING ====================
+
+  secrets-scan:
+    name: Secrets Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: Run Gitleaks
+        uses: zricethezav/gitleaks-action@master
+
+  # ==================== SAST SCANNING ====================
+
+  sast-scan:
+    name: SAST Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ github.repository_owner }}
+            -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}
+            -Dsonar.sources=.
+            -Dsonar.python.version=3
+            -Dsonar.tests=tests
+            -Dsonar.test.inclusions=tests/**/*
+
+  # ==================== COMPLIANCE CHECKS ====================
+
+  compliance-check:
+    name: Compliance Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run license compliance
+        uses: fossas/fossa-action@main
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}
+          branch: ${{ github.ref_name }}
+
+      - name: Check for banned licenses
+        run: |
+          pip install pip-licenses
+          pip-licenses --allow-only="MIT;Apache 2.0;BSD;ISC;Python Software Foundation License;Mozilla Public License 2.0 (MPL 2.0)"

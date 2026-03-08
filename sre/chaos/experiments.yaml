@@ -1,0 +1,264 @@
+# Chaos Engineering Experiments
+# Weekly chaos experiments to test system resilience
+
+apiVersion: chaos-mesh.org/v1alpha1
+kind: Schedule
+metadata:
+  name: weekly-chaos-experiments
+  namespace: chaos-engineering
+spec:
+  schedule: "0 14 * * 3"  # Every Wednesday at 14:00 UTC
+  historyLimit: 5
+  concurrencyPolicy: Forbid
+  type: Workflow
+  workflow:
+    entry: entry
+    templates:
+      - name: entry
+        templateType: Serial
+        children:
+          - pod-failure
+          - network-latency
+          - cpu-stress
+          - memory-stress
+          - database-failure
+          - dns-failure
+      
+      # ==================== POD FAILURE EXPERIMENT ====================
+      - name: pod-failure
+        templateType: PodChaos
+        duration: "5m"
+        podChaos:
+          action: pod-failure
+          mode: one
+          selector:
+            namespaces:
+              - production
+            labelSelectors:
+              app: backend
+          scheduler:
+            cron: "@every 10m"
+            duration: "5m"
+        goals:
+          - "Verify automatic pod rescheduling"
+          - "Check session persistence"
+          - "Validate circuit breakers"
+        expectedOutcome: |
+          - Service continues operating with minimal impact
+          - New pods spawn within 30 seconds
+          - Error rate < 5% during experiment
+        metrics:
+          - pod_recovery_time
+          - error_rate_during_chaos
+          - user_impact_percentage
+
+      # ==================== NETWORK LATENCY EXPERIMENT ====================
+      - name: network-latency
+        templateType: NetworkChaos
+        duration: "10m"
+        networkChaos:
+          action: delay
+          mode: all
+          selector:
+            namespaces:
+              - production
+            labelSelectors:
+              app: trading-engine
+          delay:
+            latency: "200ms"
+            correlation: "50"
+            jitter: "50ms"
+          scheduler:
+            cron: "@every 15m"
+            duration: "5m"
+        goals:
+          - "Test timeout handling"
+          - "Verify retry logic"
+          - "Check database connection pools"
+        expectedOutcome: |
+          - Order execution latency increases but succeeds
+          - Timeouts trigger proper retries
+          - No order failures due to network
+        metrics:
+          - order_execution_latency_p95
+          - retry_count
+          - timeout_error_rate
+
+      # ==================== CPU STRESS EXPERIMENT ====================
+      - name: cpu-stress
+        templateType: StressChaos
+        duration: "15m"
+        stressChaos:
+          mode: one
+          selector:
+            namespaces:
+              - production
+            labelSelectors:
+              app: ai-engine
+          stressors:
+            cpu:
+              workers: 4
+              load: 80
+              options: ["--timeout", "600", "--cpu 4"]
+          scheduler:
+            cron: "@every 30m"
+            duration: "10m"
+        goals:
+          - "Test auto-scaling"
+          - "Verify CPU limits"
+          - "Check performance degradation"
+        expectedOutcome: |
+          - HPA triggers new pods
+          - CPU stays within limits
+          - Inference latency increases gracefully
+        metrics:
+          - cpu_usage_percent
+          - hpa_trigger_count
+          - inference_latency_p95
+
+      # ==================== MEMORY STRESS EXPERIMENT ====================
+      - name: memory-stress
+        templateType: StressChaos
+        duration: "15m"
+        stressChaos:
+          mode: one
+          selector:
+            namespaces:
+              - production
+            labelSelectors:
+              app: backend
+          stressors:
+            memory:
+              workers: 2
+              size: "2GB"
+              options: ["--timeout", "600", "--vm-bytes", "2G"]
+          scheduler:
+            cron: "@every 30m"
+            duration: "10m"
+        goals:
+          - "Test memory limits"
+          - "Verify OOM handling"
+          - "Check garbage collection"
+        expectedOutcome: |
+          - Memory stays within limits
+          - No OOM kills if within limits
+          - GC overhead stays reasonable
+        metrics:
+          - memory_usage_bytes
+          - oom_kill_count
+          - gc_pause_seconds
+
+      # ==================== DATABASE FAILURE EXPERIMENT ====================
+      - name: database-failure
+        templateType: PodChaos
+        duration: "3m"
+        podChaos:
+          action: pod-kill
+          mode: one
+          selector:
+            namespaces:
+              - production
+            labelSelectors:
+              app: postgres
+        goals:
+          - "Test connection pooling"
+          - "Verify failover"
+          - "Check read replicas"
+        expectedOutcome: |
+          - Read traffic switches to replicas
+          - Connection pool reconnects
+          - Write operations queue or fail gracefully
+        metrics:
+          - failover_time
+          - connection_error_rate
+          - read_write_ratio
+
+      # ==================== DNS FAILURE EXPERIMENT ====================
+      - name: dns-failure
+        templateType: NetworkChaos
+        duration: "5m"
+        networkChaos:
+          action: loss
+          mode: all
+          selector:
+            namespaces:
+              - production
+            labelSelectors:
+              app: market-data
+          loss:
+            loss: "100"
+            correlation: "100"
+          target:
+            selector:
+              namespaces:
+                - production
+              labelSelectors:
+                app: backend
+        goals:
+          - "Test DNS caching"
+          - "Verify service discovery"
+          - "Check fallback mechanisms"
+        expectedOutcome: |
+          - Services use cached DNS
+          - Kubernetes service discovery works
+          - External API calls use fallback IPs
+        metrics:
+          - dns_lookup_time
+          - service_discovery_success_rate
+          - external_api_fallback_count
+
+      # ==================== DISK FAILURE EXPERIMENT ====================
+      - name: disk-failure
+        templateType: IOChaos
+        duration: "5m"
+        ioChaos:
+          action: latency
+          mode: one
+          selector:
+            namespaces:
+              - production
+            labelSelectors:
+              app: database
+          volumePath: /var/lib/postgresql/data
+          path: "/var/lib/postgresql/data/**/*"
+          delay: "100ms"
+          percent: 50
+        goals:
+          - "Test disk latency handling"
+          - "Verify WAL writing"
+          - "Check replication lag"
+        expectedOutcome: |
+          - Database handles slow writes
+          - WAL shipping continues
+          - Replication lag increases but catches up
+        metrics:
+          - disk_write_latency
+          - replication_lag_seconds
+          - wal_write_rate
+
+      # ==================== REGION FAILURE EXPERIMENT ====================
+      - name: region-failure
+        templateType: AWSChaos
+        duration: "30m"
+        awsChaos:
+          action: ec2-stop
+          mode: all
+          selector:
+            namespaces:
+              - production
+            labelSelectors:
+              topology.kubernetes.io/zone: us-east-1a
+          ec2Instance:
+            region: us-east-1
+        goals:
+          - "Test cross-region failover"
+          - "Verify disaster recovery"
+          - "Check data consistency"
+        expectedOutcome: |
+          - Traffic shifts to other AZs
+          - No data loss
+          - Recovery within SLA
+        metrics:
+          - failover_completion_time
+          - data_consistency_score
+          - cross_region_latency

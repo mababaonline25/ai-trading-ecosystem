@@ -1,0 +1,53 @@
+---
+- name: "🔄 Rolling Update Playbook"
+  hosts: "{{ target_hosts | default('all') }}"
+  serial: "{{ rolling_update_batch | default('25%') }}"
+  become: yes
+  vars_files:
+    - ../vars/common.yml
+    - ../vars/{{ env }}.yml
+    - ../vars/secrets.yml
+  
+  pre_tasks:
+    - name: "⏸️ Drain node (Kubernetes)"
+      shell: |
+        kubectl drain {{ inventory_hostname }} \
+          --ignore-daemonsets \
+          --delete-local-data \
+          --force
+      when: kubernetes_cluster | default(false)
+      ignore_errors: yes
+    
+    - name: "📦 Pull latest images"
+      docker_image:
+        name: "{{ item }}:{{ new_version }}"
+        source: pull
+      loop:
+        - "{{ backend_image }}"
+        - "{{ frontend_image }}"
+      when: docker_installed | default(false)
+  
+  roles:
+    - role: update
+      tags: [update]
+  
+  post_tasks:
+    - name: "✅ Verify service health"
+      wait_for:
+        port: "{{ item.port }}"
+        host: "{{ item.host | default('localhost') }}"
+        delay: 10
+        timeout: 300
+      loop:
+        - { port: 8000, host: "{{ backend_host }}" }
+        - { port: 3000, host: "{{ frontend_host }}" }
+    
+    - name: "🔄 Uncordon node (Kubernetes)"
+      shell: |
+        kubectl uncordon {{ inventory_hostname }}
+      when: kubernetes_cluster | default(false)
+      ignore_errors: yes
+    
+    - name: "📊 Update status"
+      debug:
+        msg: "Node {{ inventory_hostname }} updated to version {{ new_version }}"

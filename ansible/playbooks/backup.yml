@@ -1,0 +1,75 @@
+---
+- name: "💾 Database Backup Playbook"
+  hosts: database_servers
+  become: yes
+  vars_files:
+    - ../vars/common.yml
+    - ../vars/{{ env }}.yml
+    - ../vars/secrets.yml
+  
+  tasks:
+    - name: "📁 Create backup directory"
+      file:
+        path: "{{ backup_path }}/{{ ansible_date_time.date }}"
+        state: directory
+        mode: '0750'
+    
+    - name: "💽 Backup PostgreSQL"
+      postgresql_db:
+        name: "{{ postgres_db_name }}"
+        state: dump
+        target: "{{ backup_path }}/{{ ansible_date_time.date }}/postgres_{{ ansible_date_time.date }}.sql"
+        login_user: "{{ postgres_user }}"
+        login_password: "{{ postgres_password }}"
+        login_host: "{{ postgres_host }}"
+      when: backup_postgres | default(true)
+    
+    - name: "🗄️ Backup MongoDB"
+      shell: |
+        mongodump \
+          --host {{ mongodb_host }} \
+          --port {{ mongodb_port }} \
+          --username {{ mongodb_user }} \
+          --password {{ mongodb_password }} \
+          --authenticationDatabase admin \
+          --out {{ backup_path }}/{{ ansible_date_time.date }}/mongodb/
+      when: backup_mongodb | default(true)
+    
+    - name: "📀 Backup Redis"
+      shell: |
+        redis-cli -h {{ redis_host }} -p {{ redis_port }} -a {{ redis_password }} SAVE
+        cp /var/lib/redis/dump.rdb {{ backup_path }}/{{ ansible_date_time.date }}/redis_{{ ansible_date_time.date }}.rdb
+      when: backup_redis | default(true)
+    
+    - name: "🗜️ Compress backups"
+      archive:
+        path: "{{ backup_path }}/{{ ansible_date_time.date }}"
+        dest: "{{ backup_path }}/backup_{{ ansible_date_time.date }}.tar.gz"
+        format: gz
+        remove: yes
+    
+    - name: "☁️ Upload to S3"
+      aws_s3:
+        bucket: "{{ s3_backup_bucket }}"
+        object: "/{{ env }}/backup_{{ ansible_date_time.date }}.tar.gz"
+        src: "{{ backup_path }}/backup_{{ ansible_date_time.date }}.tar.gz"
+        mode: put
+        region: "{{ aws_region }}"
+      when: upload_to_s3 | default(true)
+    
+    - name: "🧹 Clean old backups"
+      shell: |
+        find {{ backup_path }} -name "backup_*.tar.gz" -type f -mtime +{{ backup_retention_days }} -delete
+      when: cleanup_old | default(true)
+    
+    - name: "📧 Send backup notification"
+      mail:
+        to: "{{ backup_notification_email }}"
+        subject: "✅ Backup Completed - {{ env }}"
+        body: |
+          Backup completed successfully!
+          Date: {{ ansible_date_time.date }}
+          Environment: {{ env }}
+          Size: {{ (backup_stats.stat.size / 1024 / 1024) | round(2) }} MB
+          Files: {{ backup_stats.files | default(0) }}
+      when: send_notification | default(false)

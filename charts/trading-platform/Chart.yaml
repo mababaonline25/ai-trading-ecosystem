@@ -1,0 +1,102 @@
+"""
+Helm Chart for AI Trading Ecosystem
+Enterprise-grade Kubernetes packaging
+"""
+
+apiVersion: v2
+name: trading-platform
+description: Enterprise AI Trading Ecosystem - Complete cryptocurrency trading platform with AI/ML capabilities
+type: application
+version: 3.0.0
+appVersion: 3.0.0
+kubeVersion: ">=1.28.0-0"
+
+home: https://tradingecosystem.com
+icon: https://tradingecosystem.com/icon.png
+
+sources:
+  - https://github.com/yourusername/ai-trading-ecosystem
+
+maintainers:
+  - name: Trading Team
+    email: team@tradingecosystem.com
+    url: https://tradingecosystem.com
+
+keywords:
+  - trading
+  - cryptocurrency
+  - ai
+  - machine-learning
+  - blockchain
+  - finance
+  - high-frequency-trading
+  - market-data
+  - technical-analysis
+
+dependencies:
+  - name: postgresql
+    version: 12.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+    alias: postgresql
+
+  - name: mongodb
+    version: 14.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: mongodb.enabled
+    alias: mongodb
+
+  - name: redis
+    version: 18.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+    alias: redis
+
+  - name: rabbitmq
+    version: 12.x.x
+    repository: https://charts.bitnami.com/bitnami
+    condition: rabbitmq.enabled
+    alias: rabbitmq
+
+  - name: elasticsearch
+    version: 8.x.x
+    repository: https://helm.elastic.co
+    condition: elasticsearch.enabled
+    alias: elasticsearch
+
+  - name: prometheus
+    version: 25.x.x
+    repository: https://prometheus-community.github.io/helm-charts
+    condition: prometheus.enabled
+    alias: prometheus
+
+  - name: grafana
+    version: 7.x.x
+    repository: https://grafana.github.io/helm-charts
+    condition: grafana.enabled
+    alias: grafana
+
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial release of AI Trading Ecosystem
+    - kind: added
+      description: Support for 100+ cryptocurrency exchanges
+    - kind: added
+      description: Advanced AI/ML models for price prediction
+    - kind: added
+      description: Real-time WebSocket market data
+    - kind: added
+      description: Enterprise-grade security features
+
+  artifacthub.io/containsSecurityUpdates: "false"
+  artifacthub.io/category: finance
+  artifacthub.io/license: MIT
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/recommendations: |
+    - url: https://artifacthub.io/packages/helm/bitnami/postgresql
+    - url: https://artifacthub.io/packages/helm/bitnami/redis
+    - url: https://artifacthub.io/packages/helm/bitnami/mongodb
+  artifacthub.io/signKey: |
+    fingerprint: C0DE1234567890ABCDEF1234567890ABCDEF1234
+    url: https://tradingecosystem.com/pgp-key.asc

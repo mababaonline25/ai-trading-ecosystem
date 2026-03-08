@@ -1,0 +1,207 @@
+---
+# Production Environment Variables
+
+# Application
+app_name: trading-ecosystem
+app_version: 3.0.0
+domain_name: tradingecosystem.com
+
+# Users
+app_user: trading
+app_group: trading
+app_user_id: 1000
+app_group_id: 1000
+
+# Paths
+app_path: /opt/trading
+data_path: /var/lib/trading
+logs_path: /var/log/trading
+backup_path: /backup
+
+# Database
+postgres:
+  host: "{{ postgres_host }}"
+  port: 5432
+  db_name: trading_prod
+  username: trading_user
+  pool_size: 20
+  max_overflow: 40
+  ssl_mode: require
+
+mongodb:
+  host: "{{ mongodb_host }}"
+  port: 27017
+  db_name: trading_prod
+  username: trading_user
+  max_pool_size: 100
+  ssl: true
+
+redis:
+  host: "{{ redis_host }}"
+  port: 6379
+  db: 0
+  max_connections: 50
+  ssl: true
+
+rabbitmq:
+  host: "{{ rabbitmq_host }}"
+  port: 5672
+  vhost: "/"
+  heartbeat: 60
+  ssl: true
+
+# Backend
+backend:
+  port: 8000
+  workers: 4
+  max_requests: 1000
+  timeout: 120
+  keepalive: 5
+  log_level: INFO
+  
+  cors:
+    allowed_origins:
+      - "https://{{ domain_name }}"
+      - "https://api.{{ domain_name }}"
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allowed_headers:
+      - Authorization
+      - Content-Type
+      - X-Requested-With
+  
+  rate_limit:
+    enabled: true
+    requests: 100
+    period: 60
+
+# Frontend
+frontend:
+  port: 3000
+  next_public_api_url: "https://api.{{ domain_name }}"
+  next_public_ws_url: "wss://ws.{{ domain_name }}"
+  next_public_analytics_id: "UA-XXXXX-Y"
+
+# JWT
+jwt:
+  algorithm: RS256
+  access_token_expiry: 900  # 15 minutes
+  refresh_token_expiry: 604800  # 7 days
+  issuer: "{{ domain_name }}"
+
+# Security
+security:
+  bcrypt_rounds: 12
+  session_timeout: 3600  # 1 hour
+  max_login_attempts: 5
+  lockout_duration: 900  # 15 minutes
+  password_min_length: 8
+  require_2fa: false
+
+# SSL/TLS
+ssl:
+  cert_path: /etc/ssl/certs
+  key_path: /etc/ssl/private
+  ca_path: /etc/ssl/certs
+
+# Monitoring
+monitoring:
+  prometheus_port: 9090
+  grafana_port: 3001
+  alertmanager_port: 9093
+  retention_days: 30
+  
+  alerts:
+    cpu_threshold: 80
+    memory_threshold: 85
+    disk_threshold: 90
+    error_rate_threshold: 5
+
+# Logging
+logging:
+  elasticsearch_port: 9200
+  kibana_port: 5601
+  logstash_port: 5000
+  retention_days: 30
+  
+  levels:
+    trading: INFO
+    api: INFO
+    database: WARNING
+    external: WARNING
+
+# Backup
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention_days: 30
+  s3_bucket: trading-backups-prod
+  s3_region: us-east-1
+
+# Feature Flags
+features:
+  ai_trading: true
+  social_trading: true
+  copy_trading: true
+  backtesting: true
+  paper_trading: true
+  margin_trading: false
+  futures_trading: false
+  options_trading: false
+
+# Exchanges
+exchanges:
+  enabled:
+    - binance
+    - coinbase
+    - kraken
+    - kucoin
+    - bybit
+    - okx
+    - huobi
+    - gateio
+  default: binance
+  websocket_reconnect_delay: 5
+  rate_limit: 1200
+
+# Network
+network:
+  internal_cidr: 10.0.0.0/8
+  allowed_egress:
+    - 0.0.0.0/0
+  
+  dns_servers:
+    - 8.8.8.8
+    - 8.8.4.4
+
+# Performance
+performance:
+  cache_ttl: 300
+  market_data_ttl: 10
+  price_cache_ttl: 5
+  connection_pool_size: 20
+  max_connections: 1000
+
+# Scaling
+scaling:
+  min_replicas: 3
+  max_replicas: 20
+  target_cpu: 70
+  target_memory: 80
+
+# Updates
+updates:
+  auto_security: true
+  update_window: "03:00-05:00"
+  rolling_update_batch: "25%"
+  max_unavailable: 1
+
+# Cost Management
+cost:
+  enable_cost_reporting: true
+  budget_alert_threshold: 80
+  notify_on_budget_exceed: true

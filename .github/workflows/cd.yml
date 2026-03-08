@@ -1,0 +1,258 @@
+"""
+Continuous Delivery Pipeline
+Automated deployment to staging and production
+"""
+
+name: CD Pipeline
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    branches: [main, develop]
+    types:
+      - completed
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_STAGING: trading-staging
+  EKS_CLUSTER_PROD: trading-production
+  DOCKER_REGISTRY: ghcr.io
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  # ==================== DEPLOY TO STAGING ====================
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop' && github.event.workflow_run.conclusion == 'success'
+    environment: staging
+    concurrency: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_STAGING }}
+
+      - name: Verify kubectl
+        run: |
+          kubectl version --client
+          kubectl get nodes
+
+      - name: Update Helm dependencies
+        run: |
+          helm dependency update ./charts/trading-platform
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install trading-platform ./charts/trading-platform \
+            --namespace staging \
+            --create-namespace \
+            --values ./charts/trading-platform/values/staging.yaml \
+            --set global.image.tag=${{ env.IMAGE_TAG }} \
+            --set global.image.repository=${{ env.DOCKER_REGISTRY }}/${{ github.repository }} \
+            --wait \
+            --timeout 10m
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/backend -n staging --timeout=5m
+          kubectl rollout status deployment/frontend -n staging --timeout=5m
+          kubectl get pods -n staging
+
+      - name: Run smoke tests
+        run: |
+          ./scripts/smoke-test.sh https://api.staging.tradingecosystem.com
+
+      - name: Notify Slack on success
+        if: success()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+      - name: Notify Slack on failure
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ==================== DEPLOY TO PRODUCTION ====================
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event.workflow_run.conclusion == 'success'
+    environment: production
+    concurrency: production
+    needs: deploy-staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_PROD }}
+
+      - name: Database backup before deployment
+        run: |
+          kubectl exec -n production deployment/postgres -- pg_dump -U postgres trading_prod > backup.sql
+          aws s3 cp backup.sql s3://trading-backups/production/$(date +%Y%m%d_%H%M%S).sql
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install trading-platform ./charts/trading-platform \
+            --namespace production \
+            --create-namespace \
+            --values ./charts/trading-platform/values/production.yaml \
+            --set global.image.tag=${{ env.IMAGE_TAG }} \
+            --set global.image.repository=${{ env.DOCKER_REGISTRY }}/${{ github.repository }} \
+            --wait \
+            --timeout 15m
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/backend -n production --timeout=10m
+          kubectl rollout status deployment/frontend -n production --timeout=10m
+          kubectl rollout status deployment/trading-engine -n production --timeout=10m
+          kubectl get pods -n production
+
+      - name: Run health checks
+        run: |
+          ./scripts/health-check.sh https://api.tradingecosystem.com
+          ./scripts/health-check.sh https://tradingecosystem.com
+
+      - name: Run performance tests
+        run: |
+          ./scripts/performance-test.sh https://api.tradingecosystem.com
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            backend/dist/*
+            frontend/dist/*
+
+      - name: Notify Slack on success
+        if: success()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  # ==================== CANARY DEPLOYMENT ====================
+
+  canary-deploy:
+    name: Canary Deployment
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[canary]')
+    environment: production
+    concurrency: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_PROD }}
+
+      - name: Deploy canary (10%)
+        run: |
+          kubectl set image deployment/backend backend=${{ env.DOCKER_REGISTRY }}/${{ github.repository }}/backend:${{ env.IMAGE_TAG }} -n production
+          kubectl scale deployment/backend --replicas=1 -n production
+
+      - name: Monitor canary metrics
+        run: |
+          ./scripts/monitor-canary.sh --duration=300 --threshold=0.01
+
+      - name: Rollback if needed
+        if: failure()
+        run: |
+          kubectl rollout undo deployment/backend -n production
+          kubectl scale deployment/backend --replicas=5 -n production
+
+      - name: Full rollout if successful
+        if: success()
+        run: |
+          kubectl scale deployment/backend --replicas=5 -n production
+
+  # ==================== BLUE/GREEN DEPLOYMENT ====================
+
+  blue-green-deploy:
+    name: Blue-Green Deployment
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[bluegreen]')
+    environment: production
+    concurrency: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_PROD }}
+
+      - name: Deploy green environment
+        run: |
+          kubectl apply -f kubernetes/production/deployments-green.yaml
+          kubectl rollout status deployment/backend-green -n production --timeout=5m
+
+      - name: Switch traffic to green
+        run: |
+          kubectl patch service backend -n production -p '{"spec":{"selector":{"version":"green"}}}'
+
+      - name: Verify green deployment
+        run: |
+          ./scripts/health-check.sh https://api.tradingecosystem.com
+
+      - name: Scale down blue
+        run: |
+          kubectl scale deployment/backend-blue --replicas=0 -n production
+
+      - name: Cleanup old blue
+        run: |
+          kubectl delete deployment/backend-blue -n production --ignore-not-found

@@ -1,0 +1,107 @@
+---
+- name: "🔒 Security Hardening Playbook"
+  hosts: all
+  become: yes
+  vars_files:
+    - ../vars/common.yml
+    - ../vars/{{ env }}.yml
+    - ../vars/secrets.yml
+  
+  tasks:
+    - name: "🛡️ Update system packages"
+      apt:
+        update_cache: yes
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+      when: ansible_os_family == "Debian"
+    
+    - name: "🔐 Configure SSH"
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+        backup: yes
+      loop:
+        - { regexp: '^PermitRootLogin', line: 'PermitRootLogin no' }
+        - { regexp: '^PasswordAuthentication', line: 'PasswordAuthentication no' }
+        - { regexp: '^X11Forwarding', line: 'X11Forwarding no' }
+        - { regexp: '^MaxAuthTries', line: 'MaxAuthTries 3' }
+        - { regexp: '^ClientAliveInterval', line: 'ClientAliveInterval 300' }
+        - { regexp: '^ClientAliveCountMax', line: 'ClientAliveCountMax 2' }
+      notify: restart ssh
+    
+    - name: "🔥 Configure firewall"
+      ufw:
+        rule: "{{ item.rule }}"
+        port: "{{ item.port }}"
+        proto: "{{ item.proto | default('tcp') }}"
+      loop:
+        - { rule: 'allow', port: '22', comment: 'SSH' }
+        - { rule: 'allow', port: '80', comment: 'HTTP' }
+        - { rule: 'allow', port: '443', comment: 'HTTPS' }
+        - { rule: 'allow', port: '8000', comment: 'Backend API' }
+        - { rule: 'allow', port: '3000', comment: 'Frontend' }
+      when: configure_firewall | default(true)
+    
+    - name: "📝 Install and configure fail2ban"
+      apt:
+        name: fail2ban
+        state: present
+      when: install_fail2ban | default(true)
+    
+    - name: "📋 Configure fail2ban"
+      template:
+        src: templates/jail.local.j2
+        dest: /etc/fail2ban/jail.local
+        mode: '0644'
+      notify: restart fail2ban
+      when: install_fail2ban | default(true)
+    
+    - name: "🔑 Setup automatic security updates"
+      apt:
+        name: unattended-upgrades
+        state: present
+      when: auto_security_updates | default(true)
+    
+    - name: "📁 Configure automatic updates"
+      template:
+        src: templates/50unattended-upgrades.j2
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+        mode: '0644'
+      when: auto_security_updates | default(true)
+    
+    - name: "🔍 Install and configure Lynis"
+      apt:
+        name: lynis
+        state: present
+      when: install_lynis | default(true)
+    
+    - name: "📊 Run Lynis security audit"
+      command: lynis audit system --quick
+      register: lynis_result
+      changed_when: false
+      when: run_lynis | default(false)
+    
+    - name: "📈 Display Lynis results"
+      debug:
+        msg: "{{ lynis_result.stdout_lines | select('search', 'hardening') | list }}"
+      when: run_lynis | default(false)
+    
+    - name: "🔐 Install and configure CrowdSec"
+      shell: |
+        curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh | bash
+        apt install crowdsec crowdsec-firewall-bouncer-iptables -y
+      when: install_crowdsec | default(false)
+    
+    handlers:
+      - name: restart ssh
+        service:
+          name: ssh
+          state: restarted
+      
+      - name: restart fail2ban
+        service:
+          name: fail2ban
+          state: restarted

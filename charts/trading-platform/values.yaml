@@ -1,0 +1,899 @@
+"""
+Default values for trading-platform Helm chart
+"""
+
+# Global settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: "standard"
+  environment: production
+  clusterDomain: cluster.local
+  labels: {}
+  annotations: {}
+
+# Image configuration
+image:
+  registry: ghcr.io
+  repository: yourusername/trading-platform
+  pullPolicy: Always
+  tag: latest
+
+# ==================== BACKEND CONFIGURATION ====================
+
+backend:
+  enabled: true
+  replicaCount: 3
+  
+  image:
+    repository: backend
+    tag: latest
+    pullPolicy: Always
+  
+  service:
+    type: ClusterIP
+    port: 8000
+    targetPort: 8000
+    annotations: {}
+  
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-body-size: 50m
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+      nginx.ingress.kubernetes.io/enable-cors: "true"
+      nginx.ingress.kubernetes.io/cors-allow-origin: "https://tradingecosystem.com"
+      nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+      nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
+    
+    hosts:
+      - host: api.tradingecosystem.com
+        paths:
+          - path: /
+            pathType: Prefix
+    
+    tls:
+      - secretName: api-tls
+        hosts:
+          - api.tradingecosystem.com
+  
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  
+  podSecurityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+  
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    capabilities:
+      drop:
+        - ALL
+  
+  env:
+    - name: APP_ENV
+      value: production
+    - name: LOG_LEVEL
+      value: INFO
+    - name: API_RATE_LIMIT
+      value: "100"
+  
+  envFrom:
+    - secretRef:
+        name: trading-secrets
+  
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: standard
+    accessMode: ReadWriteOnce
+  
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - backend
+            topologyKey: kubernetes.io/hostname
+  
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+  
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: backend
+
+# ==================== FRONTEND CONFIGURATION ====================
+
+frontend:
+  enabled: true
+  replicaCount: 2
+  
+  image:
+    repository: frontend
+    tag: latest
+    pullPolicy: Always
+  
+  service:
+    type: ClusterIP
+    port: 3000
+    targetPort: 3000
+    annotations: {}
+  
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-body-size: 50m
+      nginx.ingress.kubernetes.io/rewrite-target: /
+      nginx.ingress.kubernetes.io/configuration-snippet: |
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+    
+    hosts:
+      - host: tradingecosystem.com
+        paths:
+          - path: /
+            pathType: Prefix
+      - host: www.tradingecosystem.com
+        paths:
+          - path: /
+            pathType: Prefix
+    
+    tls:
+      - secretName: frontend-tls
+        hosts:
+          - tradingecosystem.com
+          - www.tradingecosystem.com
+  
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+  
+  env:
+    - name: NEXT_PUBLIC_API_URL
+      value: "https://api.tradingecosystem.com"
+    - name: NEXT_PUBLIC_WS_URL
+      value: "wss://ws.tradingecosystem.com"
+  
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ==================== MARKET DATA SERVICE ====================
+
+marketData:
+  enabled: true
+  replicaCount: 2
+  
+  image:
+    repository: market-data
+    tag: latest
+    pullPolicy: Always
+  
+  service:
+    type: ClusterIP
+    port: 8002
+    targetPort: 8002
+  
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+  
+  exchanges:
+    - binance
+    - coinbase
+    - kraken
+    - kucoin
+    - bybit
+    - okx
+    - huobi
+    - gateio
+    - mexc
+    - bitget
+  
+  websocketConnections: 10000
+  dataRetentionDays: 7
+  
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ==================== TRADING ENGINE ====================
+
+tradingEngine:
+  enabled: true
+  replicaCount: 3
+  
+  image:
+    repository: trading-engine
+    tag: latest
+    pullPolicy: Always
+  
+  service:
+    type: ClusterIP
+    port: 8003
+    targetPort: 8003
+  
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 15
+    targetCPUUtilizationPercentage: 70
+  
+  features:
+    marketOrders: true
+    limitOrders: true
+    stopOrders: true
+    trailingStops: true
+    twap: true
+    vwap: true
+    iceberg: true
+    oco: true
+  
+  maxLeverage: 10
+  defaultLeverage: 1
+  maxPositionSize: 1000000
+  minOrderSize: 0.0001
+  
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - trading-engine
+          topologyKey: kubernetes.io/hostname
+
+# ==================== AI ENGINE ====================
+
+aiEngine:
+  enabled: true
+  replicaCount: 2
+  
+  image:
+    repository: ai-engine
+    tag: latest
+    pullPolicy: Always
+  
+  service:
+    type: ClusterIP
+    port: 8004
+    targetPort: 8004
+  
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2000m"
+      nvidia.com/gpu: 1
+    limits:
+      memory: "8Gi"
+      cpu: "4000m"
+      nvidia.com/gpu: 1
+  
+  autoscaling:
+    enabled: false  # GPU scaling not supported
+  
+  models:
+    pricePrediction:
+      enabled: true
+      modelType: lstm
+      sequenceLength: 60
+      features: 50
+    
+    sentimentAnalysis:
+      enabled: true
+      modelType: bert
+      languages: [en, bn, hi, es, zh]
+    
+    patternRecognition:
+      enabled: true
+      modelType: cnn
+      patterns: 50
+    
+    reinforcement:
+      enabled: true
+      algorithm: ppo
+      episodes: 10000
+  
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-tesla-t4
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: cloud.google.com/gke-accelerator
+                operator: In
+                values:
+                  - nvidia-tesla-t4
+
+# ==================== NOTIFICATION SERVICE ====================
+
+notificationService:
+  enabled: true
+  replicaCount: 2
+  
+  image:
+    repository: notification
+    tag: latest
+    pullPolicy: Always
+  
+  service:
+    type: ClusterIP
+    port: 8005
+    targetPort: 8005
+  
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "250m"
+  
+  channels:
+    email:
+      enabled: true
+      smtp:
+        host: smtp.gmail.com
+        port: 587
+        from: notifications@tradingecosystem.com
+    
+    telegram:
+      enabled: true
+      botTokenSecret: telegram-bot-token
+    
+    discord:
+      enabled: true
+      webhookSecret: discord-webhook
+    
+    slack:
+      enabled: true
+      webhookSecret: slack-webhook
+    
+    sms:
+      enabled: false
+      provider: twilio
+    
+    push:
+      enabled: true
+      provider: firebase
+  
+  templates:
+    orderFilled: "Your order {{.orderId}} has been filled at {{.price}}"
+    priceAlert: "{{.symbol}} has reached {{.price}}"
+    signalGenerated: "New trading signal for {{.symbol}}: {{.action}}"
+  
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ==================== WEBSOCKET SERVICE ====================
+
+websocketService:
+  enabled: true
+  replicaCount: 3
+  
+  image:
+    repository: websocket
+    tag: latest
+    pullPolicy: Always
+  
+  service:
+    type: LoadBalancer
+    port: 8001
+    targetPort: 8001
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: nlb
+      service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+  
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+  
+  maxConnections: 50000
+  messageBufferSize: 100
+  pingInterval: 30
+  pingTimeout: 10
+  
+  nodeSelector: {}
+  tolerations: []
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                    - websocket
+            topologyKey: kubernetes.io/hostname
+
+# ==================== DATABASE SERVICES ====================
+
+postgresql:
+  enabled: true
+  architecture: replication
+  auth:
+    username: trading_user
+    database: trading_prod
+    existingSecret: postgres-secret
+  primary:
+    persistence:
+      size: 100Gi
+      storageClass: fast
+    resources:
+      requests:
+        memory: "4Gi"
+        cpu: "2000m"
+      limits:
+        memory: "8Gi"
+        cpu: "4000m"
+  readReplicas:
+    replicaCount: 2
+    resources:
+      requests:
+        memory: "4Gi"
+        cpu: "2000m"
+      limits:
+        memory: "8Gi"
+        cpu: "4000m"
+
+mongodb:
+  enabled: true
+  architecture: replicaset
+  replicaCount: 3
+  auth:
+    enabled: true
+    existingSecret: mongodb-secret
+  persistence:
+    size: 200Gi
+    storageClass: fast
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1000m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+
+redis:
+  enabled: true
+  architecture: replication
+  auth:
+    enabled: true
+    existingSecret: redis-secret
+  master:
+    persistence:
+      size: 50Gi
+      storageClass: fast
+    resources:
+      requests:
+        memory: "2Gi"
+        cpu: "1000m"
+      limits:
+        memory: "4Gi"
+        cpu: "2000m"
+  replica:
+    replicaCount: 2
+    resources:
+      requests:
+        memory: "2Gi"
+        cpu: "1000m"
+      limits:
+        memory: "4Gi"
+        cpu: "2000m"
+
+rabbitmq:
+  enabled: true
+  replicaCount: 3
+  auth:
+    username: admin
+    existingPasswordSecret: rabbitmq-secret
+  persistence:
+    size: 50Gi
+    storageClass: fast
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  metrics:
+    enabled: true
+
+# ==================== MONITORING ====================
+
+prometheus:
+  enabled: true
+  alertmanager:
+    enabled: true
+  kubeStateMetrics:
+    enabled: true
+  nodeExporter:
+    enabled: true
+  pushgateway:
+    enabled: true
+  persistence:
+    size: 100Gi
+    storageClass: fast
+
+grafana:
+  enabled: true
+  adminPassword: admin
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: fast
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: trading
+          orgId: 1
+          folder: Trading
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/trading
+  dashboards:
+    trading:
+      trading-overview:
+        url: https://raw.githubusercontent.com/yourusername/trading-dashboards/main/overview.json
+      trading-performance:
+        url: https://raw.githubusercontent.com/yourusername/trading-dashboards/main/performance.json
+      trading-risk:
+        url: https://raw.githubusercontent.com/yourusername/trading-dashboards/main/risk.json
+
+elasticsearch:
+  enabled: true
+  replicas: 3
+  minimumMasterNodes: 2
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2000m"
+    limits:
+      memory: "8Gi"
+      cpu: "4000m"
+  volumeClaimTemplate:
+    accessModes: ["ReadWriteOnce"]
+    resources:
+      requests:
+        storage: 200Gi
+    storageClassName: fast
+
+kibana:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+# ==================== MESSAGE QUEUE ====================
+
+kafka:
+  enabled: false  # Using RabbitMQ by default
+  replicas: 3
+  persistence:
+    size: 100Gi
+    storageClass: fast
+
+# ==================== CACHE ====================
+
+hazelcast:
+  enabled: false  # Using Redis by default
+  replicas: 3
+
+# ==================== SECURITY ====================
+
+networkPolicies:
+  enabled: true
+  
+  ingressRules:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - port: 8000
+          protocol: TCP
+        - port: 8001
+          protocol: TCP
+        - port: 3000
+          protocol: TCP
+  
+  egressRules:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: redis
+      ports:
+        - port: 6379
+          protocol: TCP
+
+podSecurityPolicy:
+  enabled: true
+
+serviceAccounts:
+  create: true
+  annotations: {}
+  name: trading-sa
+
+rbac:
+  create: true
+
+# ==================== STORAGE ====================
+
+persistence:
+  enabled: true
+  storageClass: fast
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+
+volumeSnapshots:
+  enabled: true
+  schedule: "0 2 * * *"
+  retention:
+    days: 7
+    copies: 5
+
+# ==================== BACKUP ====================
+
+backup:
+  enabled: true
+  schedule: "0 1 * * *"
+  storage:
+    s3:
+      bucket: trading-backups
+      region: us-east-1
+      path: /production
+  retention:
+    days: 30
+
+# ==================== SERVICE MESH ====================
+
+istio:
+  enabled: false
+  mtls: true
+  telemetry: true
+
+linkerd:
+  enabled: false
+
+# ==================== CERTIFICATES ====================
+
+certManager:
+  enabled: true
+  clusterIssuer: letsencrypt-prod
+  email: admin@tradingecosystem.com
+
+# ==================== SERVICE MONITORS ====================
+
+serviceMonitors:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+
+# ==================== POD DISRUPTION BUDGETS ====================
+
+podDisruptionBudgets:
+  enabled: true
+  minAvailable: 2
+
+# ==================== HORIZONTAL POD AUTOSCALING ====================
+
+horizontalPodAutoscalers:
+  enabled: true
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+        - type: Pods
+          value: 4
+          periodSeconds: 60
+      selectPolicy: Max
+
+# ==================== VERTICAL POD AUTOSCALING ====================
+
+verticalPodAutoscaler:
+  enabled: true
+  updateMode: Auto
+
+# ==================== SECRETS ====================
+
+secrets:
+  postgres:
+    username: trading_user
+    password: changeme
+  redis:
+    password: changeme
+  mongodb:
+    username: trading_user
+    password: changeme
+  rabbitmq:
+    password: changeme
+  jwt:
+    secret: changeme
+  apiKeys:
+    binance: ""
+    coinbase: ""
+    kraken: ""
+    openai: ""
+
+# ==================== CONFIGMAPS ====================
+
+configMaps:
+  app:
+    APP_ENV: production
+    LOG_LEVEL: INFO
+    API_RATE_LIMIT: "100"
+    MAX_LEVERAGE: "10"
+    DEFAULT_LEVERAGE: "1"
+    MIN_SIGNAL_CONFIDENCE: "70"
+  
+  exchanges:
+    ENABLED_EXCHANGES: binance,coinbase,kraken,kucoin,bybit,okx
+    DEFAULT_EXCHANGE: binance
+    WEBSOCKET_RECONNECT_DELAY: "5"
+
+# ==================== FEATURE FLAGS ====================
+
+features:
+  aiTrading: true
+  socialTrading: true
+  copyTrading: true
+  backtesting: true
+  paperTrading: true
+  marginTrading: false
+  futuresTrading: false
+  optionsTrading: false
+
+# ==================== RESOURCE QUOTAS ====================
+
+resourceQuotas:
+  enabled: true
+  hard:
+    requests.cpu: "100"
+    requests.memory: 200Gi
+    limits.cpu: "200"
+    limits.memory: 400Gi
+    persistentvolumeclaims: 50
+    pods: 100
+    services: 50
+    secrets: 100
+    configmaps: 100
+
+# ==================== LIMIT RANGES ====================
+
+limitRanges:
+  enabled: true
+  limits:
+    - max:
+        cpu: "4"
+        memory: 8Gi
+      min:
+        cpu: 100m
+        memory: 256Mi
+      default:
+        cpu: 500m
+        memory: 1Gi
+      defaultRequest:
+        cpu: 200m
+        memory: 512Mi
+      type: Container
+
+# ==================== TESTS ====================
+
+tests:
+  enabled: true
+  image:
+    repository: bats/bats
+    tag: latest

@@ -1,0 +1,701 @@
+"""
+Kubernetes Deployments
+Main application deployments
+"""
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: trading-production
+  labels:
+    app: backend
+    version: v1
+    component: api
+    tier: backend
+spec:
+  replicas: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: backend
+        image: trading-registry/backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          name: http
+        - containerPort: 8001
+          name: grpc
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-secret
+              key: DB_PASSWORD
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
+        - name: MONGO_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: MONGO_HOST
+        - name: MONGO_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: MONGO_PORT
+        - name: MONGO_USER
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: MONGO_USER
+        - name: MONGO_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mongodb-secret
+              key: MONGO_PASSWORD
+        - name: RABBITMQ_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_HOST
+        - name: RABBITMQ_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_PORT
+        - name: RABBITMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_USER
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_PASSWORD
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: jwt-secret
+              key: JWT_SECRET
+        - name: BINANCE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: BINANCE_API_KEY
+        - name: BINANCE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: BINANCE_SECRET_KEY
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: OPENAI_API_KEY
+        - name: TELEGRAM_BOT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: telegram-secret
+              key: TELEGRAM_BOT_TOKEN
+        - name: TELEGRAM_CHAT_ID
+          valueFrom:
+            secretKeyRef:
+              name: telegram-secret
+              key: TELEGRAM_CHAT_ID
+        - name: APP_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: APP_ENV
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: LOG_LEVEL
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+        startupProbe:
+          httpGet:
+            path: /startup
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 30
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+        - name: logs
+          mountPath: /var/log/trading
+        - name: models
+          mountPath: /app/models
+      volumes:
+      - name: config
+        configMap:
+          name: app-config
+      - name: logs
+        emptyDir: {}
+      - name: models
+        persistentVolumeClaim:
+          claimName: models-pvc
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - backend
+              topologyKey: kubernetes.io/hostname
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "backend"
+        effect: "NoSchedule"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: trading-production
+  labels:
+    app: frontend
+    version: v1
+    component: web
+    tier: frontend
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+        version: v1
+    spec:
+      containers:
+      - name: frontend
+        image: trading-registry/frontend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: NEXT_PUBLIC_API_URL
+          value: "https://api.tradingecosystem.com"
+        - name: NEXT_PUBLIC_WS_URL
+          value: "wss://ws.tradingecosystem.com"
+        - name: NODE_ENV
+          value: "production"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - frontend
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: market-data-service
+  namespace: trading-production
+  labels:
+    app: market-data
+    version: v1
+    component: microservice
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: market-data
+  template:
+    metadata:
+      labels:
+        app: market-data
+    spec:
+      containers:
+      - name: market-data
+        image: trading-registry/market-data:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
+        - name: RABBITMQ_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_HOST
+        - name: RABBITMQ_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_PORT
+        - name: RABBITMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_USER
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_PASSWORD
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trading-engine
+  namespace: trading-production
+  labels:
+    app: trading-engine
+    version: v1
+    component: microservice
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: trading-engine
+  template:
+    metadata:
+      labels:
+        app: trading-engine
+    spec:
+      containers:
+      - name: trading-engine
+        image: trading-registry/trading-engine:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
+        - name: RABBITMQ_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_HOST
+        - name: RABBITMQ_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_PORT
+        - name: RABBITMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_USER
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_PASSWORD
+        - name: MAX_LEVERAGE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: MAX_LEVERAGE
+        - name: MAX_POSITION_SIZE
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: MAX_POSITION_SIZE
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-engine
+  namespace: trading-production
+  labels:
+    app: ai-engine
+    version: v1
+    component: microservice
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-engine
+  template:
+    metadata:
+      labels:
+        app: ai-engine
+    spec:
+      containers:
+      - name: ai-engine
+        image: trading-registry/ai-engine:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
+        - name: RABBITMQ_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_HOST
+        - name: RABBITMQ_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_PORT
+        - name: RABBITMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_USER
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_PASSWORD
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: OPENAI_API_KEY
+        - name: MODEL_PATH
+          value: "/models"
+        volumeMounts:
+        - name: models
+          mountPath: /models
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: ai-models-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: trading-production
+  labels:
+    app: notification
+    version: v1
+    component: microservice
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: notification
+  template:
+    metadata:
+      labels:
+        app: notification
+    spec:
+      containers:
+      - name: notification
+        image: trading-registry/notification:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
+        - name: RABBITMQ_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_HOST
+        - name: RABBITMQ_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_PORT
+        - name: RABBITMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_USER
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_PASSWORD
+        - name: TELEGRAM_BOT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: telegram-secret
+              key: TELEGRAM_BOT_TOKEN
+        - name: TELEGRAM_CHAT_ID
+          valueFrom:
+            secretKeyRef:
+              name: telegram-secret
+              key: TELEGRAM_CHAT_ID
+        - name: EMAIL_HOST
+          valueFrom:
+            secretKeyRef:
+              name: email-secret
+              key: EMAIL_HOST
+        - name: EMAIL_PORT
+          valueFrom:
+            secretKeyRef:
+              name: email-secret
+              key: EMAIL_PORT
+        - name: EMAIL_USER
+          valueFrom:
+            secretKeyRef:
+              name: email-secret
+              key: EMAIL_USER
+        - name: EMAIL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: email-secret
+              key: EMAIL_PASSWORD
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: websocket-service
+  namespace: trading-production
+  labels:
+    app: websocket
+    version: v1
+    component: microservice
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: websocket
+  template:
+    metadata:
+      labels:
+        app: websocket
+    spec:
+      containers:
+      - name: websocket
+        image: trading-registry/websocket:latest
+        ports:
+        - containerPort: 8001
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: REDIS_PASSWORD
+        - name: RABBITMQ_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_HOST
+        - name: RABBITMQ_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RABBITMQ_PORT
+        - name: RABBITMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_USER
+        - name: RABBITMQ_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-secret
+              key: RABBITMQ_PASSWORD
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"

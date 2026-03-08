@@ -1,0 +1,90 @@
+---
+- name: "🎯 Complete AI Trading Ecosystem Deployment"
+  hosts: all
+  gather_facts: yes
+  become: yes
+  vars_files:
+    - ../vars/common.yml
+    - ../vars/{{ env }}.yml
+    - ../vars/secrets.yml
+  
+  pre_tasks:
+    - name: "📋 Check required variables"
+      assert:
+        that:
+          - env is defined
+          - version is defined
+          - domain_name is defined
+        fail_msg: "Required variables not set"
+    
+    - name: "🔧 Set facts based on environment"
+      set_fact:
+        deploy_env: "{{ env }}"
+        app_version: "{{ version }}"
+        deploy_timestamp: "{{ ansible_date_time.iso8601 }}"
+  
+  roles:
+    - role: common
+      tags: [always, common]
+    
+    - role: docker
+      tags: [docker]
+      when: install_docker | default(true)
+    
+    - role: kubernetes
+      tags: [kubernetes]
+      when: install_kubernetes | default(false)
+    
+    - role: database
+      tags: [database]
+      when: setup_database | default(true)
+    
+    - role: redis
+      tags: [redis]
+      when: setup_redis | default(true)
+    
+    - role: rabbitmq
+      tags: [rabbitmq]
+      when: setup_rabbitmq | default(true)
+    
+    - role: backend
+      tags: [backend]
+      when: deploy_backend | default(true)
+    
+    - role: frontend
+      tags: [frontend]
+      when: deploy_frontend | default(true)
+    
+    - role: nginx
+      tags: [nginx]
+      when: setup_nginx | default(true)
+    
+    - role: monitoring
+      tags: [monitoring]
+      when: setup_monitoring | default(true)
+    
+    - role: logging
+      tags: [logging]
+      when: setup_logging | default(true)
+  
+  post_tasks:
+    - name: "✅ Verify deployment"
+      uri:
+        url: "https://{{ domain_name }}/health"
+        method: GET
+        status_code: 200
+        timeout: 30
+      register: health_check
+      retries: 10
+      delay: 5
+      until: health_check.status == 200
+      tags: [verify]
+    
+    - name: "📊 Deployment summary"
+      debug:
+        msg:
+          - "✅ Deployment completed successfully!"
+          - "🌐 Application URL: https://{{ domain_name }}"
+          - "📅 Deployment time: {{ deploy_timestamp }}"
+          - "🔧 Environment: {{ deploy_env }}"
+          - "📦 Version: {{ app_version }}"

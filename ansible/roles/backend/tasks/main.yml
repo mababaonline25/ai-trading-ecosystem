@@ -1,0 +1,122 @@
+---
+- name: "📦 Create backend directories"
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+  loop:
+    - "{{ backend_path }}"
+    - "{{ backend_logs_path }}"
+    - "{{ backend_config_path }}"
+    - "{{ backend_venv_path }}"
+
+- name: "📋 Copy backend configuration"
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0644'
+  loop:
+    - { src: "backend.env.j2", dest: "{{ backend_path }}/.env" }
+    - { src: "backend.config.json.j2", dest: "{{ backend_config_path }}/config.json" }
+    - { src: "logging.conf.j2", dest: "{{ backend_config_path }}/logging.conf" }
+  notify: restart backend
+
+- name: "🐍 Setup Python virtual environment"
+  pip:
+    requirements: "{{ backend_path }}/requirements/{{ env }}.txt"
+    virtualenv: "{{ backend_venv_path }}"
+    virtualenv_python: python3.11
+  become_user: "{{ app_user }}"
+
+- name: "🔄 Run database migrations"
+  shell: |
+    source {{ backend_venv_path }}/bin/activate
+    alembic upgrade head
+  args:
+    chdir: "{{ backend_path }}"
+  become_user: "{{ app_user }}"
+  when: run_migrations | default(true)
+
+- name: "📦 Setup backend systemd service"
+  template:
+    src: backend.service.j2
+    dest: /etc/systemd/system/backend.service
+    mode: '0644'
+  notify: reload systemd
+
+- name: "🚀 Start and enable backend service"
+  systemd:
+    name: backend
+    state: started
+    enabled: yes
+    daemon_reload: yes
+
+- name: "🔄 Configure log rotation"
+  template:
+    src: logrotate.backend.j2
+    dest: /etc/logrotate.d/backend
+    mode: '0644'
+
+- name: "🔍 Setup health check"
+  uri:
+    url: "http://localhost:{{ backend_port }}/health"
+    method: GET
+    status_code: 200
+  register: health_result
+  retries: 5
+  delay: 10
+  until: health_result.status == 200
+
+- name: "📊 Setup Prometheus metrics endpoint"
+  lineinfile:
+    path: "{{ backend_config_path }}/config.json"
+    regexp: '"metrics_enabled"'
+    line: '  "metrics_enabled": true,'
+    insertafter: '{'
+  notify: restart backend
+
+- name: "🛡️ Setup firewall rules for backend"
+  ufw:
+    rule: allow
+    port: "{{ backend_port }}"
+    proto: tcp
+    from_ip: "{{ item }}"
+  loop: "{{ allowed_backend_ips }}"
+  when: configure_firewall | default(true)
+
+- name: "📈 Setup monitoring"
+  template:
+    src: prometheus_backend.yml.j2
+    dest: "{{ prometheus_targets_path }}/backend.yml"
+    mode: '0644'
+  when: setup_monitoring | default(true)
+
+- name: "💾 Create backup cron job"
+  cron:
+    name: "backend backup"
+    minute: "{{ backup_cron_minute | default('0') }}"
+    hour: "{{ backup_cron_hour | default('2') }}"
+    job: "{{ backend_backup_script }}"
+    user: "{{ app_user }}"
+  when: enable_backups | default(true)
+
+- name: "📧 Setup alerting"
+  template:
+    src: alert_rules_backend.yml.j2
+    dest: "{{ prometheus_alerts_path }}/backend.yml"
+    mode: '0644'
+  when: setup_alerts | default(true)
+
+- name: "🔐 Setup SSL/TLS"
+  include_tasks: ssl.yml
+  when: configure_ssl | default(true)
+
+- name: "📋 Generate deployment report"
+  template:
+    src: deployment_report.html.j2
+    dest: "{{ backend_path }}/reports/deployment_{{ ansible_date_time.epoch }}.html"
+    mode: '0644'

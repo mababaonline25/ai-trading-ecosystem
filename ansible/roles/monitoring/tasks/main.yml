@@ -1,0 +1,224 @@
+---
+- name: "📊 Setup Prometheus"
+  block:
+    - name: "📦 Create Prometheus directories"
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ prometheus_config_path }}"
+        - "{{ prometheus_data_path }}"
+        - "{{ prometheus_rules_path }}"
+        - "{{ prometheus_targets_path }}"
+
+    - name: "📋 Copy Prometheus configuration"
+      template:
+        src: prometheus.yml.j2
+        dest: "{{ prometheus_config_path }}/prometheus.yml"
+        mode: '0644'
+      notify: restart prometheus
+
+    - name: "📋 Copy Prometheus rules"
+      template:
+        src: "{{ item }}"
+        dest: "{{ prometheus_rules_path }}/{{ item | basename | replace('.j2', '') }}"
+        mode: '0644'
+      loop:
+        - "{{ lookup('fileglob', '../templates/prometheus/rules/*.j2') }}"
+      notify: restart prometheus
+
+    - name: "📦 Setup Prometheus Docker container"
+      docker_container:
+        name: prometheus
+        image: prom/prometheus:{{ prometheus_version }}
+        restart_policy: always
+        ports:
+          - "{{ prometheus_port }}:9090"
+        volumes:
+          - "{{ prometheus_config_path }}:/etc/prometheus:ro"
+          - "{{ prometheus_data_path }}:/prometheus"
+          - "{{ prometheus_rules_path }}:/etc/prometheus/rules:ro"
+          - "{{ prometheus_targets_path }}:/etc/prometheus/targets:ro"
+        command:
+          - "--config.file=/etc/prometheus/prometheus.yml"
+          - "--storage.tsdb.path=/prometheus"
+          - "--storage.tsdb.retention.time={{ prometheus_retention }}"
+          - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+          - "--web.console.templates=/usr/share/prometheus/consoles"
+        networks:
+          - name: "{{ docker_network }}"
+      when: use_docker | default(true)
+
+- name: "📊 Setup Grafana"
+  block:
+    - name: "📦 Create Grafana directories"
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ grafana_data_path }}"
+        - "{{ grafana_dashboards_path }}"
+        - "{{ grafana_datasources_path }}"
+
+    - name: "📋 Copy Grafana datasources"
+      template:
+        src: grafana_datasource.yml.j2
+        dest: "{{ grafana_datasources_path }}/prometheus.yml"
+        mode: '0644'
+      notify: restart grafana
+
+    - name: "📋 Import Grafana dashboards"
+      template:
+        src: "{{ item }}"
+        dest: "{{ grafana_dashboards_path }}/{{ item | basename | replace('.j2', '') }}"
+        mode: '0644'
+      loop:
+        - "{{ lookup('fileglob', '../templates/grafana/dashboards/*.j2') }}"
+      notify: restart grafana
+
+    - name: "📦 Setup Grafana Docker container"
+      docker_container:
+        name: grafana
+        image: grafana/grafana:{{ grafana_version }}
+        restart_policy: always
+        ports:
+          - "{{ grafana_port }}:3000"
+        environment:
+          GF_SECURITY_ADMIN_USER: "{{ grafana_admin_user }}"
+          GF_SECURITY_ADMIN_PASSWORD: "{{ grafana_admin_password }}"
+          GF_INSTALL_PLUGINS: "grafana-piechart-panel,grafana-worldmap-panel"
+        volumes:
+          - "{{ grafana_data_path }}:/var/lib/grafana"
+          - "{{ grafana_dashboards_path }}:/etc/grafana/provisioning/dashboards:ro"
+          - "{{ grafana_datasources_path }}:/etc/grafana/provisioning/datasources:ro"
+        networks:
+          - name: "{{ docker_network }}"
+      when: use_docker | default(true)
+
+- name: "⚠️ Setup Alertmanager"
+  block:
+    - name: "📦 Create Alertmanager directories"
+      file:
+        path: "{{ alertmanager_data_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: "📋 Copy Alertmanager configuration"
+      template:
+        src: alertmanager.yml.j2
+        dest: "{{ alertmanager_config_path }}/alertmanager.yml"
+        mode: '0644'
+      notify: restart alertmanager
+
+    - name: "📦 Setup Alertmanager Docker container"
+      docker_container:
+        name: alertmanager
+        image: prom/alertmanager:{{ alertmanager_version }}
+        restart_policy: always
+        ports:
+          - "{{ alertmanager_port }}:9093"
+        volumes:
+          - "{{ alertmanager_config_path }}:/etc/alertmanager:ro"
+          - "{{ alertmanager_data_path }}:/alertmanager"
+        command:
+          - "--config.file=/etc/alertmanager/alertmanager.yml"
+          - "--storage.path=/alertmanager"
+        networks:
+          - name: "{{ docker_network }}"
+      when: use_docker | default(true)
+
+- name: "📈 Setup Node Exporter"
+  block:
+    - name: "📦 Setup Node Exporter Docker container"
+      docker_container:
+        name: node_exporter
+        image: prom/node-exporter:{{ node_exporter_version }}
+        restart_policy: always
+        ports:
+          - "{{ node_exporter_port }}:9100"
+        volumes:
+          - "/proc:/host/proc:ro"
+          - "/sys:/host/sys:ro"
+          - "/:/rootfs:ro"
+        command:
+          - "--path.procfs=/host/proc"
+          - "--path.sysfs=/host/sys"
+          - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+        networks:
+          - name: "{{ docker_network }}"
+      when: use_docker | default(true)
+
+- name: "🔍 Setup Blackbox Exporter"
+  block:
+    - name: "📦 Setup Blackbox Exporter Docker container"
+      docker_container:
+        name: blackbox_exporter
+        image: prom/blackbox-exporter:{{ blackbox_version }}
+        restart_policy: always
+        ports:
+          - "{{ blackbox_port }}:9115"
+        volumes:
+          - "{{ blackbox_config_path }}:/config"
+        command:
+          - "--config.file=/config/blackbox.yml"
+        networks:
+          - name: "{{ docker_network }}"
+      when: use_docker | default(true)
+
+- name: "📊 Setup cAdvisor"
+  block:
+    - name: "📦 Setup cAdvisor Docker container"
+      docker_container:
+        name: cadvisor
+        image: gcr.io/cadvisor/cadvisor:{{ cadvisor_version }}
+        restart_policy: always
+        ports:
+          - "{{ cadvisor_port }}:8080"
+        volumes:
+          - "/:/rootfs:ro"
+          - "/var/run:/var/run:rw"
+          - "/sys:/sys:ro"
+          - "/var/lib/docker/:/var/lib/docker:ro"
+          - "/dev/disk/:/dev/disk:ro"
+        privileged: true
+        networks:
+          - name: "{{ docker_network }}"
+      when: use_docker | default(true)
+
+- name: "🔄 Setup monitoring stack with docker-compose"
+  template:
+    src: docker-compose.monitoring.yml.j2
+    dest: "{{ monitoring_path }}/docker-compose.yml"
+    mode: '0644'
+  when: use_docker_compose | default(false)
+
+- name: "🚀 Start monitoring stack"
+  docker_compose:
+    project_src: "{{ monitoring_path }}"
+    state: present
+  when: use_docker_compose | default(false)
+
+- name: "🔧 Configure Prometheus targets"
+  template:
+    src: prometheus_targets.yml.j2
+    dest: "{{ prometheus_targets_path }}/{{ item.name }}.yml"
+    mode: '0644'
+  loop: "{{ prometheus_targets }}"
+  notify: reload prometheus
+
+- name: "📈 Setup Grafana dashboards via API"
+  uri:
+    url: "http://localhost:{{ grafana_port }}/api/dashboards/db"
+    method: POST
+    user: "{{ grafana_admin_user }}"
+    password: "{{ grafana_admin_password }}"
+    force_basic_auth: yes
+    body:
+      dashboard: "{{ lookup('file', item) | from_json }}"
+      overwrite: true
+    body_format: json
+    status_code: 200
+  loop: "{{ lookup('fileglob', '../files/grafana/dashboards/*.json', wantlist=True) }}"
+  when: configure_grafana_api | default(false)

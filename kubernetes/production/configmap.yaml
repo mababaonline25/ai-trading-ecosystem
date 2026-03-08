@@ -1,0 +1,415 @@
+"""
+Kubernetes ConfigMaps
+Environment-specific configuration
+"""
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: trading-production
+data:
+  # Application settings
+  APP_ENV: "production"
+  APP_NAME: "AI Trading Ecosystem"
+  APP_VERSION: "2.0.0"
+  LOG_LEVEL: "INFO"
+  API_RATE_LIMIT: "100"
+  API_TIMEOUT: "30"
+  
+  # Database settings
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "trading_prod"
+  DB_POOL_SIZE: "20"
+  DB_MAX_OVERFLOW: "40"
+  
+  # Redis settings
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  REDIS_MAX_CONNECTIONS: "50"
+  
+  # MongoDB settings
+  MONGO_HOST: "mongodb-service"
+  MONGO_PORT: "27017"
+  MONGO_DB: "trading_prod"
+  MONGO_MAX_POOL_SIZE: "100"
+  
+  # RabbitMQ settings
+  RABBITMQ_HOST: "rabbitmq-service"
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_VHOST: "/"
+  
+  # Microservice endpoints
+  MARKET_DATA_URL: "http://market-data-service:8000"
+  TRADING_ENGINE_URL: "http://trading-engine-service:8000"
+  AI_ENGINE_URL: "http://ai-engine-service:8000"
+  NOTIFICATION_URL: "http://notification-service:8000"
+  WEBSOCKET_URL: "ws://websocket-service:8001"
+  
+  # Trading settings
+  DEFAULT_LEVERAGE: "1"
+  MAX_LEVERAGE: "10"
+  MIN_SIGNAL_CONFIDENCE: "70"
+  MAX_POSITION_SIZE: "100000"
+  DAILY_LOSS_LIMIT: "5000"
+  
+  # Exchange settings
+  EXCHANGES: "binance,coinbase,kraken,kucoin,bybit,okx"
+  DEFAULT_EXCHANGE: "binance"
+  WEBSOCKET_RECONNECT_DELAY: "5"
+  
+  # Cache settings
+  CACHE_TTL: "300"
+  MARKET_DATA_TTL: "10"
+  PRICE_CACHE_TTL: "5"
+  
+  # Monitoring
+  METRICS_ENABLED: "true"
+  TRACING_ENABLED: "true"
+  PROFILING_ENABLED: "false"
+  
+  # Feature flags
+  ENABLE_AI_TRADING: "true"
+  ENABLE_SOCIAL_TRADING: "true"
+  ENABLE_COPY_TRADING: "true"
+  ENABLE_BACKTESTING: "true"
+  ENABLE_PAPER_TRADING: "true"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: trading-production
+data:
+  nginx.conf: |
+    events {
+        worker_connections 4096;
+        multi_accept on;
+        use epoll;
+    }
+    
+    http {
+        upstream backend {
+            least_conn;
+            server backend-service:8000 max_fails=3 fail_timeout=30s;
+            server backend-service-2:8000 max_fails=3 fail_timeout=30s;
+            keepalive 32;
+        }
+        
+        upstream frontend {
+            least_conn;
+            server frontend-service:3000 max_fails=3 fail_timeout=30s;
+            server frontend-service-2:3000 max_fails=3 fail_timeout=30s;
+            keepalive 32;
+        }
+        
+        server {
+            listen 80;
+            server_name api.tradingecosystem.com;
+            return 301 https://$server_name$request_uri;
+        }
+        
+        server {
+            listen 443 ssl http2;
+            server_name api.tradingecosystem.com;
+            
+            ssl_certificate /etc/nginx/ssl/tls.crt;
+            ssl_certificate_key /etc/nginx/ssl/tls.key;
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_ciphers HIGH:!aNULL:!MD5;
+            
+            location / {
+                proxy_pass http://backend;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection 'upgrade';
+                proxy_set_header Host $host;
+                proxy_cache_bypass $http_upgrade;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                
+                # Rate limiting
+                limit_req zone=api burst=100 nodelay;
+                limit_req_status 429;
+                
+                # CORS
+                add_header Access-Control-Allow-Origin *;
+                add_header Access-Control-Allow-Methods 'GET, POST, PUT, DELETE, OPTIONS';
+                add_header Access-Control-Allow-Headers 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization';
+                
+                # Security headers
+                add_header X-Frame-Options "SAMEORIGIN" always;
+                add_header X-Content-Type-Options "nosniff" always;
+                add_header X-XSS-Protection "1; mode=block" always;
+                add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+            }
+            
+            location /health {
+                access_log off;
+                return 200 "healthy\n";
+                add_header Content-Type text/plain;
+            }
+            
+            location /metrics {
+                access_log off;
+                proxy_pass http://backend/metrics;
+            }
+        }
+        
+        server {
+            listen 80;
+            server_name tradingecosystem.com;
+            return 301 https://$server_name$request_uri;
+        }
+        
+        server {
+            listen 443 ssl http2;
+            server_name tradingecosystem.com;
+            
+            ssl_certificate /etc/nginx/ssl/tls.crt;
+            ssl_certificate_key /etc/nginx/ssl/tls.key;
+            
+            root /usr/share/nginx/html;
+            index index.html;
+            
+            location / {
+                try_files $uri $uri/ /index.html;
+                
+                # Cache static assets
+                location ~* \.(jpg|jpeg|png|gif|ico|css|js)$ {
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                }
+            }
+            
+            location /api {
+                proxy_pass http://backend/api;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection 'upgrade';
+                proxy_set_header Host $host;
+                proxy_cache_bypass $http_upgrade;
+            }
+        }
+        
+        # Rate limiting zones
+        limit_req_zone $binary_remote_addr zone=api:10m rate=100r/s;
+        limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: trading-production
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        environment: production
+        cluster: trading-production
+    
+    alerting:
+      alertmanagers:
+      - static_configs:
+        - targets: ['alertmanager-service:9093']
+    
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+    
+    scrape_configs:
+    - job_name: 'kubernetes-pods'
+      kubernetes_sd_configs:
+      - role: pod
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+      - action: labelmap
+        regex: __meta_kubernetes_pod_label_(.+)
+      - source_labels: [__meta_kubernetes_namespace]
+        action: replace
+        target_label: kubernetes_namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        action: replace
+        target_label: kubernetes_pod_name
+    
+    - job_name: 'kubernetes-services'
+      kubernetes_sd_configs:
+      - role: service
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+    
+    - job_name: 'kubernetes-nodes'
+      kubernetes_sd_configs:
+      - role: node
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+      - action: labelmap
+        regex: __meta_kubernetes_node_label_(.+)
+    
+    - job_name: 'kubernetes-apiservers'
+      kubernetes_sd_configs:
+      - role: endpoints
+      scheme: https
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        insecure_skip_verify: true
+      bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: default;kubernetes;https
+    
+    - job_name: 'postgres-exporter'
+      static_configs:
+      - targets: ['postgres-exporter-service:9187']
+    
+    - job_name: 'redis-exporter'
+      static_configs:
+      - targets: ['redis-exporter-service:9121']
+    
+    - job_name: 'mongodb-exporter'
+      static_configs:
+      - targets: ['mongodb-exporter-service:9216']
+    
+    - job_name: 'rabbitmq-exporter'
+      static_configs:
+      - targets: ['rabbitmq-exporter-service:15672']
+    
+    - job_name: 'node-exporter'
+      kubernetes_sd_configs:
+      - role: node
+      relabel_configs:
+      - source_labels: [__address__]
+        replacement: node-exporter-service:9100
+        target_label: __address__
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: trading-production
+data:
+  trading-dashboard.json: |
+    {
+      "dashboard": {
+        "title": "Trading Platform Overview",
+        "panels": [
+          {
+            "title": "Active Users",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(active_users_total)",
+                "legendFormat": "Active Users"
+              }
+            ]
+          },
+          {
+            "title": "Orders per Second",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(orders_total[1m])",
+                "legendFormat": "Orders/s"
+              }
+            ]
+          },
+          {
+            "title": "API Latency",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))",
+                "legendFormat": "P95 Latency"
+              }
+            ]
+          },
+          {
+            "title": "System CPU Usage",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(container_cpu_usage_seconds_total[5m])) by (pod)",
+                "legendFormat": "{{ pod }}"
+              }
+            ]
+          },
+          {
+            "title": "Memory Usage",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(container_memory_usage_bytes) by (pod)",
+                "legendFormat": "{{ pod }}"
+              }
+            ]
+          },
+          {
+            "title": "Trading Volume",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "sum(rate(trading_volume_usd_total[5m]))",
+                "legendFormat": "Volume"
+              }
+            ]
+          },
+          {
+            "title": "Active Positions",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "sum(active_positions_total)"
+              }
+            ]
+          },
+          {
+            "title": "Win Rate",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "avg(trading_win_rate)"
+              }
+            ],
+            "unit": "percent"
+          }
+        ],
+        "refresh": "30s",
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        }
+      }
+    }
